@@ -212,8 +212,8 @@ final class LayerCompositor {
                                                               width: width, height: height, mipmapped: false)
         fxDesc.usage = [.shaderRead, .shaderWrite]
         fxDesc.storageMode = .private
-        compTargets = (0..<3).compactMap { device.makeTexture(descriptor: compDesc) }
-        fxTargets = (0..<3).compactMap { device.makeTexture(descriptor: fxDesc) }
+        compTargets = (0..<3).compactMap { _ in device.makeTexture(descriptor: compDesc) }
+        fxTargets = (0..<3).compactMap { _ in device.makeTexture(descriptor: fxDesc) }
     }
 
     /// Procedural displacement map (R/G carry the x/y offset, 0.5 = no movement).
