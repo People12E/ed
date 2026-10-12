@@ -10,7 +10,17 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      # Cache XcodeGen Homebrew installation to speed up runner execution
+      - name: Cache Homebrew packages
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/Homebrew
+          key: ${{ runner.os }}-brew-xcodegen-${{ hashFiles('**/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-brew-xcodegen-
 
       - name: Select newest stable Xcode
         run: |
@@ -34,6 +44,15 @@ jobs:
 
       - name: Generate Xcode project
         run: xcodegen generate
+
+      # Cache DerivedData compilation outputs across runs
+      - name: Cache DerivedData
+        uses: actions/cache@v4
+        with:
+          path: build/
+          key: ${{ runner.os }}-deriveddata-${{ hashFiles('**/*.swift', '**/project.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-deriveddata-
 
       - name: Build (unsigned, device SDK)
         run: |
@@ -63,7 +82,7 @@ jobs:
           ls -lh MotionForge-unsigned.ipa
 
       - name: Upload IPA
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: MotionForge-unsigned-ipa
           path: |
@@ -71,14 +90,14 @@ jobs:
             MotionForge-unsigned.tipa
 
       - name: Upload Payload folder (the raw .app, for tools that want it unzipped)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: Payload
           path: Payload/
 
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v4.4.3
         with:
           name: build-log
           path: build.log
