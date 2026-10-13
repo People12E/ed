@@ -9,6 +9,8 @@ import CoreVideo
 struct ExportJob {
     var layers: [Layer]
     var videos: [UUID: VideoSource]
+    var models: [UUID: ModelAsset]
+    var lighting: LightingSettings
     var canvas: CGSize
     var duration: Double
     var fps: Double
@@ -133,8 +135,9 @@ final class Exporter {
                   let cb = queue.makeCommandBuffer() else { return nil }
 
             let t = Double(i) / Double(fpsInt)
-            let snap = RenderSnapshot.make(layers: job.layers, videos: job.videos, time: t,
-                                           canvas: CGSize(width: w, height: h), fx: job.fx, engine: engine)
+            let snap = RenderSnapshot.make(layers: job.layers, videos: job.videos, models: job.models, time: t,
+                                           canvas: CGSize(width: w, height: h), fx: job.fx,
+                                           lighting: job.lighting, engine: engine)
             guard let frame = compositor.render(snap, commandBuffer: cb) else { return nil }
 
             let rpd = MTLRenderPassDescriptor()

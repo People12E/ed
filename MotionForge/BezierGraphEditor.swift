@@ -6,7 +6,7 @@ import SwiftUI
 
 // MARK: - Model
 
-struct CubicBezier: Equatable, Hashable {
+struct CubicBezier: Equatable, Hashable, Codable {
     var x1: Double, y1: Double, x2: Double, y2: Double
 
     static let linear    = CubicBezier(x1: 0,    y1: 0,    x2: 1,    y2: 1)

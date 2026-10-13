@@ -43,6 +43,7 @@ struct PropertyRow: View {
     var unit = ""
     var keyState: KeyState? = nil
     var onToggleKey: (() -> Void)? = nil
+    var decimals = 0
 
     var body: some View {
         HStack(spacing: 8) {
@@ -61,7 +62,7 @@ struct PropertyRow: View {
             Text(title).font(.footnote).foregroundStyle(Theme.textSecondary)
                 .frame(width: 64, alignment: .leading)
             Slider(value: $value, in: range).tint(Theme.accent)
-            Text("\(value, specifier: "%.0f")\(unit)")
+            Text(String(format: "%.\(decimals)f", value) + unit)
                 .font(.footnote.monospacedDigit())
                 .frame(width: 58, alignment: .trailing)
         }
@@ -71,7 +72,8 @@ struct PropertyRow: View {
 struct PropertyDrawer: View {
     @Bindable var project: ProjectModel
     @Binding var showGraph: Bool
-    @State private var open: Set<String> = ["Layer", "Transform", "Effects"]
+    @Binding var showLibrary: Bool
+    @State private var open: Set<String> = ["Layer", "Transform", "Effects", "Tracking"]
     @State private var exprProp: TransformProp = .rotation
 
     private func binding(_ key: String) -> Binding<Bool> {
@@ -94,6 +96,12 @@ struct PropertyDrawer: View {
                 if let layer = project.selected {
                     layerSection(layer)
                     transformSection
+                    parentSection
+                    if layer.kind.hasImage {
+                        threeDSection(layer)
+                        layerEffectsSection(layer)
+                    }
+                    trackingSection
                     expressionSection
                 } else {
                     Text("Select a layer in the timeline or on the canvas to edit it.")
@@ -101,6 +109,7 @@ struct PropertyDrawer: View {
                         .frame(maxWidth: .infinity, alignment: .leading).padding(14)
                         .background(Theme.panel.opacity(0.85), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 }
+                lightingSection
                 effectsSection
                 easingSection
                 neuralSection
@@ -138,6 +147,45 @@ struct PropertyDrawer: View {
                 PropertyRow(title: "Height", value: layerBinding(\.shapeHeight, fallback: 300), range: 20...2000, unit: "px")
                 ColorPicker("Color", selection: layerBinding(\.color, fallback: .white))
                     .font(.footnote)
+            case .fill:
+                Text("Fills this area from the pixels around it, so what's underneath disappears. Move it over an object, or track it so it follows the object.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Picker("Shape", selection: layerBinding(\.shape, fallback: .roundedRectangle)) {
+                    ForEach(ShapeKind.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                PropertyRow(title: "Width", value: layerBinding(\.shapeWidth, fallback: 360), range: 20...2000, unit: "px")
+                PropertyRow(title: "Height", value: layerBinding(\.shapeHeight, fallback: 240), range: 20...2000, unit: "px")
+                PropertyRow(title: "Feather", value: layerBinding(\.feather, fallback: 24), range: 1...200, unit: "px")
+                PropertyRow(title: "Grain", value: layerBinding(\.grain, fallback: 0.2), range: 0...1, decimals: 2)
+            case .null:
+                Text("An invisible helper. Set other layers' Parent to this layer, then move, scale or rotate the null to move them all together.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .camera:
+                Text("The active 3D camera. Move it in X, Y and Z, rotate it, and change the field of view. It affects 3D layers and models. The topmost camera in the stack is used.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            case .light:
+                Picker("Type", selection: layerBinding(\.lightType, fallback: .spot)) {
+                    ForEach(LightType.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                ColorPicker("Color", selection: layerBinding(\.color, fallback: .white)).font(.footnote)
+                if layer.lightType == .spot || layer.lightType == .parallel {
+                    Toggle("Casts shadows", isOn: layerBinding(\.castsShadow, fallback: true)).tint(Theme.accent)
+                }
+            case .model:
+                Text(layer.modelFile.map { URL(fileURLWithPath: $0).lastPathComponent } ?? "3D model")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                ColorPicker("Tint", selection: layerBinding(\.color, fallback: .white)).font(.footnote)
+                PropertyRow(title: "Metallic", value: layerBinding(\.metallic, fallback: 0), range: 0...1, decimals: 2)
+                PropertyRow(title: "Roughness", value: layerBinding(\.roughness, fallback: 0.5), range: 0...1, decimals: 2)
+                Text("Leave metallic at 0 and roughness at 0.5 to use the materials stored in the file.")
+                    .font(.caption2).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             case .video:
                 Text("Source \(Int(layer.sourceSize.width)) × \(Int(layer.sourceSize.height))")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
@@ -199,7 +247,7 @@ struct PropertyDrawer: View {
 
     private var transformSection: some View {
         DrawerSection(title: "Transform", symbol: "move.3d", isOpen: binding("Transform")) {
-            ForEach(TransformProp.allCases) { p in
+            ForEach(TransformProp.relevant(for: project.selected ?? Layer(name: "", kind: .null))) { p in
                 PropertyRow(
                     title: p.title,
                     value: Binding(get: { project.value(p) }, set: { project.setValue(p, $0) }),
@@ -214,14 +262,135 @@ struct PropertyDrawer: View {
         }
     }
 
+    // MARK: Parent, 3D, effects stack, lighting
+
+    private var parentSection: some View {
+        DrawerSection(title: "Parent", symbol: "link", isOpen: binding("Parent")) {
+            Picker("Parent", selection: Binding(
+                get: { project.selected?.parentID },
+                set: { project.setParent($0) })) {
+                Text("None").tag(UUID?.none)
+                ForEach(project.layers.filter { $0.id != project.selectedID }) { l in
+                    Text(l.name).tag(Optional(l.id))
+                }
+            }
+            .pickerStyle(.menu)
+            Text("A child follows its parent's movement, scale and rotation. Linking keeps the layer where it is.")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func threeDSection(_ layer: Layer) -> some View {
+        DrawerSection(title: "3D layer", symbol: "cube", isOpen: binding("3D")) {
+            Toggle("Make this a 3D layer", isOn: layerBinding(\.is3D, fallback: false)).tint(Theme.accent)
+            if layer.is3D {
+                Toggle("Accepts lights", isOn: layerBinding(\.acceptsLights, fallback: true)).tint(Theme.accent)
+            }
+            Text("3D layers and models render together in depth and are seen through the active camera. Z, Rotate X and Rotate Y appear under Transform.")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private func layerEffectsSection(_ layer: Layer) -> some View {
+        DrawerSection(title: "Effects (\(layer.effects.count))", symbol: "sparkles", isOpen: binding("LayerFX")) {
+            ForEach(layer.effects) { fx in
+                EffectRow(project: project, effect: fx)
+            }
+            Button { showLibrary = true } label: {
+                Label("Add effect", systemImage: "plus.circle.fill")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity).frame(height: 40)
+                    .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    .foregroundStyle(Theme.accent)
+            }
+            .buttonStyle(PressableStyle())
+        }
+    }
+
+    private var lightingSection: some View {
+        DrawerSection(title: "Lighting", symbol: "sun.max", isOpen: binding("Lighting")) {
+            Toggle("Realistic lighting", isOn: $project.lighting.realistic).tint(Theme.accent)
+            PropertyRow(title: "Sky light", value: $project.lighting.environment, range: 0...2, decimals: 2)
+            PropertyRow(title: "Exposure", value: $project.lighting.exposure, range: 0.2...3, decimals: 2)
+            Toggle("Shadows", isOn: $project.lighting.shadows).tint(Theme.accent)
+            if project.lighting.shadows {
+                PropertyRow(title: "Softness", value: $project.lighting.softness, range: 0.5...4, decimals: 1)
+            }
+            Text("Realistic lighting gives 3D layers and models physically based highlights, sky and ground light, soft shadows from spot and parallel lights, and filmic tone mapping. Add lights from the + menu.")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    // MARK: Tracking
+
+    private var placingBinding: Binding<Bool> {
+        Binding(
+            get: { project.trackerPoint != nil },
+            set: { on in
+                project.trackerPoint = on
+                    ? CGPoint(x: project.canvas.width / 2, y: project.canvas.height / 2)
+                    : nil
+            })
+    }
+
+    private func trackButton(_ title: String, symbol: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Label(title, systemImage: symbol)
+                .font(.subheadline.weight(.semibold))
+                .frame(maxWidth: .infinity).frame(height: 40)
+                .background(Theme.raised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .foregroundStyle(Theme.textPrimary)
+        }
+        .buttonStyle(PressableStyle())
+        .disabled(project.trackProgress != nil)
+        .opacity(project.trackProgress != nil ? 0.5 : 1)
+    }
+
+    private var trackingSection: some View {
+        DrawerSection(title: "Tracking", symbol: "scope", isOpen: binding("Tracking")) {
+            Text("Select the layer that should follow the motion (text, shape or content fill), then choose what to track. Tracking writes X and Y keyframes you can edit afterwards.")
+                .font(.caption).foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            trackButton("Track face", symbol: "viewfinder") {
+                Task { await project.runTrack(.face) }
+            }
+
+            Toggle("Point tracker on preview", isOn: placingBinding).tint(Theme.accent)
+            if project.trackerPoint != nil {
+                Text("Drag the box over something with clear detail, park the playhead where tracking should start, then track.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                PropertyRow(title: "Box size", value: $project.trackerSize, range: 40...400, unit: "px")
+                trackButton("Track point from playhead", symbol: "scope") {
+                    Task { await project.runTrack(.point) }
+                }
+            }
+
+            if let p = project.trackProgress {
+                ProgressView(value: p).tint(Theme.accent)
+            }
+            if let status = project.trackStatus {
+                Text(status).font(.caption).foregroundStyle(Theme.textPrimary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            Text("3D camera solving isn't included yet. This is 2D tracking.")
+                .font(.caption2).foregroundStyle(Theme.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
     // MARK: Expressions
 
     private var expressionSection: some View {
         DrawerSection(title: "Expression", symbol: "function", isOpen: binding("Expression")) {
             Picker("Property", selection: $exprProp) {
-                ForEach(TransformProp.allCases) { Text($0.title).tag($0) }
+                ForEach(TransformProp.relevant(for: project.selected ?? Layer(name: "", kind: .null))) { Text($0.title).tag($0) }
             }
-            .pickerStyle(.segmented)
+            .pickerStyle(.menu)
 
             TextField("e.g. wiggle(2, 30)", text: expressionBinding, axis: .vertical)
                 .font(.system(.footnote, design: .monospaced))
@@ -259,7 +428,7 @@ struct PropertyDrawer: View {
             PropertyRow(title: "Amount", value: $project.fx.displaceScale, range: 0...120, unit: "px")
             PropertyRow(title: "Turbulence", value: $project.fx.turbulence, range: 0...80, unit: "px")
             PropertyRow(title: "Aberration", value: $project.fx.caAmount, range: 0...40, unit: "px")
-            PropertyRow(title: "Falloff", value: $project.fx.caFalloff, range: 0.5...4)
+            PropertyRow(title: "Falloff", value: $project.fx.caFalloff, range: 0.5...4, decimals: 1)
             PropertyRow(title: "Length", value: $project.duration, range: 1...300, unit: "s")
         }
     }

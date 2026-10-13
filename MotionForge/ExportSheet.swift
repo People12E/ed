@@ -99,7 +99,8 @@ struct ExportSheet: View {
 
     @MainActor
     private func start() {
-        let job = ExportJob(layers: project.layers, videos: project.videos, canvas: project.canvas,
+        let job = ExportJob(layers: project.layers, videos: project.videos, models: project.models,
+                            lighting: project.lighting, canvas: project.canvas,
                             duration: project.duration, fps: project.fps, fx: project.fx)
         let e = Exporter()
         exporter = e

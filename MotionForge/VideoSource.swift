@@ -105,16 +105,41 @@ final class VideoSource: @unchecked Sendable {
         return makeTexture(pb)
     }
 
-    // MARK: Decoding
+    // MARK: Sequential scan (trackers)
 
-    private func readFrame(at t: Double) -> CVPixelBuffer? {
-        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
-        let settings: [String: Any] = [
+    /// Decodes the whole clip once, front to back, and calls `body` for roughly every `step` seconds
+    /// with the clip-local time and the upright BGRA frame. Return false from `body` to stop early.
+    func scan(step: Double, body: (Double, CVPixelBuffer) -> Bool) {
+        guard let reader = try? AVAssetReader(asset: asset) else { return }
+        let out = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: readerSettings)
+        out.videoComposition = composition
+        guard reader.canAdd(out) else { return }
+        reader.add(out)
+        guard reader.startReading() else { return }
+        defer { reader.cancelReading() }
+        var next = 0.0
+        while let sample = out.copyNextSampleBuffer() {
+            let t = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+            if t + 1e-4 < next { continue }
+            guard let pb = CMSampleBufferGetImageBuffer(sample) else { continue }
+            next = t + step
+            if !body(t, pb) { break }
+        }
+    }
+
+    private var readerSettings: [String: Any] {
+        [
             kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
             kCVPixelBufferMetalCompatibilityKey as String: true,
             kCVPixelBufferIOSurfacePropertiesKey as String: [String: Any]()
         ]
-        let out = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: settings)
+    }
+
+    // MARK: Decoding
+
+    private func readFrame(at t: Double) -> CVPixelBuffer? {
+        guard let reader = try? AVAssetReader(asset: asset) else { return nil }
+        let out = AVAssetReaderVideoCompositionOutput(videoTracks: [track], videoSettings: readerSettings)
         out.videoComposition = composition
         guard reader.canAdd(out) else { return nil }
         reader.add(out)

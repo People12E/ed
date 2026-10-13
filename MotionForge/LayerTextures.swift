@@ -42,7 +42,7 @@ final class LayerTextureStore {
         format.opaque = false
 
         switch layer.kind {
-        case .video:
+        case .video, .fill, .null, .camera, .light, .model:
             return nil
 
         case .text:

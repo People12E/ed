@@ -70,6 +70,16 @@ struct TransportBar: View {
             Menu {
                 Button { project.addLayer(kind: .text) } label: { Label("Text", systemImage: LayerKind.text.symbol) }
                 Button { project.addLayer(kind: .shape) } label: { Label("Shape", systemImage: LayerKind.shape.symbol) }
+                Button { project.addLayer(kind: .fill) } label: { Label("Content fill", systemImage: LayerKind.fill.symbol) }
+                Divider()
+                Button { project.addLayer(kind: .null) } label: { Label("Null object", systemImage: LayerKind.null.symbol) }
+                Button { project.addLayer(kind: .camera) } label: { Label("3D camera", systemImage: LayerKind.camera.symbol) }
+                Menu {
+                    ForEach(LightType.allCases) { t in
+                        Button(t.title) { project.addLayer(kind: .light, lightType: t) }
+                    }
+                } label: { Label("Light", systemImage: LayerKind.light.symbol) }
+                Button { project.showModelImporter = true } label: { Label("3D model…", systemImage: LayerKind.model.symbol) }
             } label: {
                 Image(systemName: "plus").font(.system(size: 16, weight: .bold))
                     .frame(width: 40, height: 40)

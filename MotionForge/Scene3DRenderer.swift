@@ -126,7 +126,7 @@ final class Scene3DRenderer {
         let width = Float(comp.width), height = Float(comp.height)
         let cam = snap.camera
         let view = cam.viewMatrix
-        let proj = M4.projection(width: width, height: height, fovY: cam.fovY, near: 1, far: 100000)
+        let proj = M4.projection(width: width, height: height, fovY: cam.fovY, near: 10, far: 100000)
         let deg = Float.pi / 180
 
         var models: [Item] = []
